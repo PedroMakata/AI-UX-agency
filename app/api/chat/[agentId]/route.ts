@@ -216,9 +216,10 @@ export async function POST(
     }
 
     // Prepare message content - may include images
+    type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
     type ContentBlock =
       | { type: 'text'; text: string }
-      | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
+      | { type: 'image'; source: { type: 'base64'; media_type: ImageMediaType; data: string } };
 
     const userMessageContent: ContentBlock[] = [];
 
@@ -234,7 +235,7 @@ export async function POST(
               type: 'image',
               source: {
                 type: 'base64',
-                media_type: imageData.mediaType,
+                media_type: imageData.mediaType as ImageMediaType,
                 data: imageData.data
               }
             });

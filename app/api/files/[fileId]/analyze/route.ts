@@ -75,7 +75,7 @@ export async function POST(
               type: 'image',
               source: {
                 type: 'base64',
-                media_type: imageData.mediaType,
+                media_type: imageData.mediaType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
                 data: imageData.data
               }
             },
