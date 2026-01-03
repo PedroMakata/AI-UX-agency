@@ -130,7 +130,12 @@ export async function POST(
       }
 
       agentName = customAgent.name;
-      systemPrompt = (customAgent.systemPrompt || `Jsi ${customAgent.name}, ${customAgent.role}.`) + FILE_ACCESS_PROMPT + IMAGE_ANALYSIS_PROMPT;
+      // Build base prompt - use custom systemPrompt or generate default
+      const basePrompt = (customAgent.systemPrompt && customAgent.systemPrompt.trim())
+        ? customAgent.systemPrompt.trim()
+        : `Jsi ${customAgent.name}, ${customAgent.role}. Pomáháš s UX/design úkoly.`;
+      // Always append file and image access prompts
+      systemPrompt = basePrompt + FILE_ACCESS_PROMPT + IMAGE_ANALYSIS_PROMPT;
     } else {
       const builtInAgent = AGENTS[agentId as keyof typeof AGENTS];
       if (!builtInAgent) {
