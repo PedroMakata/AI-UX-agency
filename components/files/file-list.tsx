@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { File, Download, Trash2, FileText, FileAudio, FileVideo, FileImage, Globe, AlertTriangle, Loader2 } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { File, Download, Trash2, FileText, FileAudio, FileVideo, FileImage, Globe, AlertTriangle, Loader2, Filter } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import {
@@ -12,6 +12,16 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+
+type FileFilter = 'all' | 'pdf' | 'docx' | 'txt' | 'images';
+
+const FILE_FILTERS: { key: FileFilter; label: string; extensions: string[] }[] = [
+  { key: 'all', label: 'Vse', extensions: [] },
+  { key: 'pdf', label: 'PDF', extensions: ['.pdf'] },
+  { key: 'docx', label: 'DOCX', extensions: ['.docx'] },
+  { key: 'txt', label: 'TXT', extensions: ['.txt'] },
+  { key: 'images', label: 'Obrazky', extensions: ['.jpg', '.jpeg', '.png'] },
+];
 
 interface FileItem {
   id: string;
@@ -35,10 +45,35 @@ export function FileList({ projectId }: FileListProps) {
   const [loading, setLoading] = useState(true);
   const [deleteFileId, setDeleteFileId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [activeFilter, setActiveFilter] = useState<FileFilter>('all');
 
   useEffect(() => {
     loadFiles();
   }, [projectId]);
+
+  // Filter files based on active filter
+  const filteredFiles = useMemo(() => {
+    if (activeFilter === 'all') return files;
+    const filter = FILE_FILTERS.find(f => f.key === activeFilter);
+    if (!filter) return files;
+    return files.filter(file => {
+      const ext = '.' + file.original_name.split('.').pop()?.toLowerCase();
+      return filter.extensions.includes(ext);
+    });
+  }, [files, activeFilter]);
+
+  // Count files per filter type
+  const filterCounts = useMemo(() => {
+    const counts: Record<FileFilter, number> = { all: files.length, pdf: 0, docx: 0, txt: 0, images: 0 };
+    files.forEach(file => {
+      const ext = '.' + file.original_name.split('.').pop()?.toLowerCase();
+      if (ext === '.pdf') counts.pdf++;
+      else if (ext === '.docx') counts.docx++;
+      else if (ext === '.txt') counts.txt++;
+      else if (['.jpg', '.jpeg', '.png'].includes(ext)) counts.images++;
+    });
+    return counts;
+  }, [files]);
 
   const loadFiles = async () => {
     try {
@@ -111,6 +146,23 @@ export function FileList({ projectId }: FileListProps) {
 
   return (
     <>
+      {/* Filter Bar */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <Filter className="w-4 h-4 text-muted-foreground" />
+        {FILE_FILTERS.map((filter) => (
+          <Button
+            key={filter.key}
+            variant={activeFilter === filter.key ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setActiveFilter(filter.key)}
+            className="text-xs"
+          >
+            {filter.label}
+            <span className="ml-1 opacity-70">({filterCounts[filter.key]})</span>
+          </Button>
+        ))}
+      </div>
+
       <Card>
         <Table>
           <TableHeader>
@@ -123,7 +175,14 @@ export function FileList({ projectId }: FileListProps) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {files.map((file) => (
+            {filteredFiles.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                  Zadne soubory tohoto typu
+                </TableCell>
+              </TableRow>
+            ) : null}
+            {filteredFiles.map((file) => (
               <TableRow key={file.id}>
                 <TableCell>
                   {getFileIcon(file.file_type)}
