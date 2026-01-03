@@ -141,8 +141,10 @@ export async function POST(
     }
 
     // Načti context z projektových souborů
-    let projectFiles;
-    let selectedFiles;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let projectFiles: any[] | null = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let selectedFiles: any[] | null = null;
 
     // If specific files are selected, load those with full content
     if (fileIds && fileIds.length > 0) {
