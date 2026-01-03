@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
-import { Send, Loader2, Paperclip, X, FileText, Search } from 'lucide-react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { Send, Loader2, Paperclip, X, FileText, Search, Image as ImageIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -53,8 +53,68 @@ export function AgentChat({
   const [selectedFiles, setSelectedFiles] = useState<AttachedFile[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [pastedImagePreview, setPastedImagePreview] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const { markAsRead, markAsUnread } = useNotifications();
+
+  // Upload image file and return file data
+  const uploadImageFile = useCallback(async (file: File): Promise<{ id: string; name: string } | null> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('projectId', projectId);
+
+    try {
+      const res = await fetch('/api/files/upload', { method: 'POST', body: formData });
+      if (res.ok) {
+        const data = await res.json();
+        return { id: data.file.id, name: data.file.original_name };
+      }
+    } catch (error) {
+      console.error('Failed to upload image:', error);
+    }
+    return null;
+  }, [projectId]);
+
+  // Handle paste event for images
+  const handlePaste = useCallback(async (e: ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (!file) continue;
+
+        // Show preview
+        const reader = new FileReader();
+        reader.onload = () => setPastedImagePreview(reader.result as string);
+        reader.readAsDataURL(file);
+
+        // Upload the image
+        setUploadingImage(true);
+        const timestamp = Date.now();
+        const ext = file.type.split('/')[1] || 'png';
+        const namedFile = new File([file], `pasted-image-${timestamp}.${ext}`, { type: file.type });
+
+        const uploadedFile = await uploadImageFile(namedFile);
+        if (uploadedFile) {
+          setSelectedFiles(prev => [...prev, uploadedFile]);
+          // Refresh project files list
+          const res = await fetch(`/api/files?projectId=${projectId}`);
+          if (res.ok) {
+            const data = await res.json();
+            setProjectFiles(data.files || []);
+          }
+        }
+        setUploadingImage(false);
+        setPastedImagePreview(null);
+        break;
+      }
+    }
+  }, [projectId, uploadImageFile]);
 
   // Normalize text for diacritic-insensitive search
   const normalizeText = (text: string) =>
@@ -99,6 +159,15 @@ export function AgentChat({
   useEffect(() => {
     markAsRead(agentId);
   }, [agentId, markAsRead]);
+
+  // Add paste event listener for images
+  useEffect(() => {
+    const input = inputRef.current;
+    if (input) {
+      input.addEventListener('paste', handlePaste as EventListener);
+      return () => input.removeEventListener('paste', handlePaste as EventListener);
+    }
+  }, [handlePaste]);
 
   // Load project files when file picker is opened
   useEffect(() => {
@@ -327,24 +396,38 @@ export function AgentChat({
       </ScrollArea>
 
       <div className="p-4 border-t space-y-2">
+        {/* Pasted Image Preview */}
+        {uploadingImage && pastedImagePreview && (
+          <div className="flex items-center gap-2 p-2 bg-muted rounded-lg">
+            <img src={pastedImagePreview} alt="Pasted" className="h-16 w-16 object-cover rounded" />
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Nahravani obrazku...
+            </div>
+          </div>
+        )}
+
         {/* Selected Files */}
         {selectedFiles.length > 0 && (
           <div className="flex flex-wrap gap-2">
-            {selectedFiles.map((file) => (
-              <span
-                key={file.id}
-                className="inline-flex items-center gap-1 text-xs bg-muted rounded-full px-2 py-1"
-              >
-                <FileText className="h-3 w-3" />
-                {file.name}
-                <button
-                  onClick={() => removeSelectedFile(file.id)}
-                  className="hover:text-destructive"
+            {selectedFiles.map((file) => {
+              const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(file.name);
+              return (
+                <span
+                  key={file.id}
+                  className="inline-flex items-center gap-1 text-xs bg-muted rounded-full px-2 py-1"
                 >
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
-            ))}
+                  {isImage ? <ImageIcon className="h-3 w-3" /> : <FileText className="h-3 w-3" />}
+                  {file.name}
+                  <button
+                    onClick={() => removeSelectedFile(file.id)}
+                    className="hover:text-destructive"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              );
+            })}
           </div>
         )}
 
@@ -357,6 +440,7 @@ export function AgentChat({
               <div className="space-y-1">
                 {projectFiles.map((file) => {
                   const isSelected = selectedFiles.some(f => f.id === file.id);
+                  const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(file.original_name);
                   return (
                     <button
                       key={file.id}
@@ -365,7 +449,7 @@ export function AgentChat({
                         isSelected ? 'bg-primary/10 text-primary' : ''
                       }`}
                     >
-                      <FileText className="h-4 w-4" />
+                      {isImage ? <ImageIcon className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
                       {file.original_name}
                     </button>
                   );
@@ -384,11 +468,12 @@ export function AgentChat({
             <Paperclip className="h-4 w-4" />
           </Button>
           <Input
+            ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={handleKeyPress}
-            placeholder={`Napiš ${agentName}...`}
-            disabled={loading}
+            placeholder={`Napiš ${agentName}... (Ctrl+V pro vložení obrázku)`}
+            disabled={loading || uploadingImage}
             className="flex-1"
           />
           <Button

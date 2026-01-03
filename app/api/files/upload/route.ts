@@ -1,13 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
 
-// PDF text extraction using require for CommonJS compatibility
+// Disable worker for Node.js environment
+GlobalWorkerOptions.workerSrc = '';
+
+// PDF text extraction using pdfjs-dist (reliable Node.js compatible)
 async function extractPdfText(buffer: Buffer): Promise<string> {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const pdfParse = require('pdf-parse');
-    const data = await pdfParse(buffer);
-    return data.text.substring(0, 50000); // Limit to 50k chars
+    const uint8Array = new Uint8Array(buffer);
+    const pdf = await getDocument({ data: uint8Array, useSystemFonts: true }).promise;
+
+    let fullText = '';
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items
+        .map((item: { str?: string }) => item.str || '')
+        .join(' ');
+      fullText += pageText + '\n';
+    }
+
+    console.log(`PDF extracted: ${fullText.length} characters from ${pdf.numPages} pages`);
+    return fullText.substring(0, 50000); // Limit to 50k chars
   } catch (error) {
     console.error('PDF parse error:', error);
     return '';
@@ -76,6 +92,71 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Check for rename strategy from form data
+    const renameStrategy = formData.get('renameStrategy') as string | null;
+    const customName = formData.get('customName') as string | null;
+
+    // Determine the original name to use
+    let originalName = file.name;
+    if (customName) {
+      // Keep extension from original file
+      const ext = file.name.split('.').pop();
+      const customBase = customName.replace(/\.[^/.]+$/, ''); // Remove extension if provided
+      originalName = `${customBase}.${ext}`;
+    }
+
+    // Check for duplicate files in the same project
+    const { data: existingFiles } = await supabase
+      .from('files')
+      .select('id, original_name')
+      .eq('project_id', projectId)
+      .ilike('original_name', `${originalName.replace(/\.[^/.]+$/, '')}%`);
+
+    // Find exact match or numbered versions
+    const baseName = originalName.replace(/\.[^/.]+$/, '');
+    const ext = originalName.split('.').pop();
+    const exactMatch = existingFiles?.find(f => f.original_name === originalName);
+
+    if (exactMatch && !renameStrategy) {
+      // Find the next available number
+      const pattern = new RegExp(`^${baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(-\\d+)?\\.${ext}$`, 'i');
+      const numberedFiles = existingFiles?.filter(f => pattern.test(f.original_name)) || [];
+
+      let maxNum = 0;
+      numberedFiles.forEach(f => {
+        const match = f.original_name.match(/-(\d+)\./);
+        if (match) {
+          maxNum = Math.max(maxNum, parseInt(match[1]));
+        }
+      });
+
+      const suggestedName = `${baseName}-${maxNum + 2}.${ext}`;
+
+      return NextResponse.json({
+        isDuplicate: true,
+        existingFile: exactMatch,
+        originalName: originalName,
+        suggestedName: suggestedName,
+        message: `Soubor "${originalName}" již existuje`
+      }, { status: 409 });
+    }
+
+    // If auto-rename strategy, use suggested name
+    if (renameStrategy === 'auto' && exactMatch) {
+      const pattern = new RegExp(`^${baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(-\\d+)?\\.${ext}$`, 'i');
+      const numberedFiles = existingFiles?.filter(f => pattern.test(f.original_name)) || [];
+
+      let maxNum = 0;
+      numberedFiles.forEach(f => {
+        const match = f.original_name.match(/-(\d+)\./);
+        if (match) {
+          maxNum = Math.max(maxNum, parseInt(match[1]));
+        }
+      });
+
+      originalName = `${baseName}-${maxNum + 2}.${ext}`;
+    }
+
     // Upload do Supabase Storage
     const fileExt = file.name.split('.').pop();
     const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
@@ -122,7 +203,7 @@ export async function POST(request: NextRequest) {
       .insert({
         project_id: projectId,
         name: fileName,
-        original_name: file.name,
+        original_name: originalName, // Use potentially renamed file
         file_type: getFileType(file.type),
         mime_type: file.type,
         storage_path: filePath,
@@ -173,8 +254,16 @@ export async function POST(request: NextRequest) {
           .update({ processing_status: 'failed' })
           .eq('id', fileRecord.id);
       }
+    } else if (file.type.startsWith('image/')) {
+      // For images, mark as completed - analysis happens on-demand or in chat
+      await supabase
+        .from('files')
+        .update({ processing_status: 'completed' })
+        .eq('id', fileRecord.id);
+      fileRecord.processing_status = 'completed';
+      console.log(`Image uploaded: ${file.name} - ready for visual analysis by agents`);
     } else {
-      // Mark non-PDF files as completed
+      // Mark other files as completed
       await supabase
         .from('files')
         .update({ processing_status: 'completed' })

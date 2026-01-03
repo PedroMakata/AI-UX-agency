@@ -145,7 +145,8 @@ export async function GET(request: NextRequest) {
     }
 
     // Query the Notion database
-    const response = await notion.databases.query({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const response = await (notion as any).databases.query({
       database_id: databaseId,
       page_size: 100
     });

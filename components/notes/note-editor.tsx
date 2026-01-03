@@ -283,6 +283,14 @@ export function NoteEditor({ noteId, projectId, onDelete, onUpdate, onCreateSubp
   };
 
   const transformBlock = (blockId: string, newType: BlockType) => {
+    // Handle page transformation - call outside of setBlocks to avoid setState during render
+    if (newType === 'page' && onCreateSubpage) {
+      onCreateSubpage(noteId);
+      setActiveMenuBlockId(null);
+      setMenuFilter('');
+      return;
+    }
+
     setBlocks(prev => prev.map(block => {
       if (block.id !== blockId) return block;
 
@@ -293,12 +301,6 @@ export function NoteEditor({ noteId, projectId, onDelete, onUpdate, onCreateSubp
           i === 0 ? [{ id: `${Date.now()}-0`, type: 'text', content: block.content }] : []
         );
         return { ...block, type: newType, columns, content: '' };
-      }
-
-      // Handle page transformation
-      if (newType === 'page' && onCreateSubpage) {
-        onCreateSubpage(noteId);
-        return block;
       }
 
       // Handle toggle transformation
