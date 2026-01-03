@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Loader2, Paperclip, X, FileText, Search, Image as ImageIcon } from 'lucide-react';
+import { Send, Loader2, Paperclip, X, FileText, Search, Image as ImageIcon, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -57,6 +57,7 @@ export function AgentChat({
   const [pastedImagePreview, setPastedImagePreview] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const { markAsRead, markAsUnread } = useNotifications();
 
   // Upload image file and return file data
@@ -114,6 +115,39 @@ export function AgentChat({
         break;
       }
     }
+  }, [projectId, uploadImageFile]);
+
+  // Handle image file input selection
+  const handleImageFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    for (const file of files) {
+      if (!file.type.startsWith('image/')) continue;
+
+      // Show preview
+      const reader = new FileReader();
+      reader.onload = () => setPastedImagePreview(reader.result as string);
+      reader.readAsDataURL(file);
+
+      // Upload the image
+      setUploadingImage(true);
+      const uploadedFile = await uploadImageFile(file);
+      if (uploadedFile) {
+        setSelectedFiles(prev => [...prev, uploadedFile]);
+        // Refresh project files list
+        const res = await fetch(`/api/files?projectId=${projectId}`);
+        if (res.ok) {
+          const data = await res.json();
+          setProjectFiles(data.files || []);
+        }
+      }
+      setUploadingImage(false);
+      setPastedImagePreview(null);
+    }
+
+    // Reset input
+    e.target.value = '';
   }, [projectId, uploadImageFile]);
 
   // Normalize text for diacritic-insensitive search
@@ -459,13 +493,33 @@ export function AgentChat({
           </Card>
         )}
 
+        {/* Hidden file input for image upload */}
+        <input
+          type="file"
+          ref={imageInputRef}
+          onChange={handleImageFileSelect}
+          accept="image/*"
+          className="hidden"
+          multiple
+        />
+
         <div className="flex gap-2">
           <Button
             variant={showFilePicker ? 'secondary' : 'outline'}
             size="icon"
             onClick={() => setShowFilePicker(!showFilePicker)}
+            title="Pridat existujici soubor"
           >
             <Paperclip className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => imageInputRef.current?.click()}
+            disabled={uploadingImage}
+            title="Nahrat obrazek"
+          >
+            <ImageIcon className="h-4 w-4" />
           </Button>
           <Input
             ref={inputRef}
